@@ -44,16 +44,20 @@ Type
     FormatSettings: TFormatSettings;
     Function GetFieldNames(Field: Integer): String;
     Function GetFieldTypes(Field: Integer): Char;
+    Function GetFieldLength(Field: Integer): Byte;
+    Function GetDecimalCount(Field: Integer): Byte;
     Function GetFieldValues(Field: Integer): Variant;
   public
+    Constructor Create;
     Function IndexOf(const FieldName: String): Integer;
   public
-    Constructor Create;
     Property FileName: String read FFileName;
     Property FieldCount: Integer read FFieldCount;
     Property RecordCount: Integer read FRecordCount;
     Property FieldNames[Field: Integer]: String read GetFieldNames;
     Property FieldTypes[Field: Integer]: Char read GetFieldTypes;
+    Property FieldLength[Field: Integer]: Byte read GetFieldLength;
+    Property DecimalCount[Field: Integer]: Byte read GetDecimalCount;
     Property FieldValues[Field: Integer]: Variant read GetFieldValues; default;
   end;
 
@@ -196,6 +200,16 @@ begin
   Result := FFields[Field].FFieldType;
 end;
 
+Function TDBFFile.GetFieldLength(Field: Integer): Byte;
+begin
+  Result := FFields[Field].FieldLength;
+end;
+
+Function TDBFFile.GetDecimalCount(Field: Integer): Byte;
+begin
+  Result := FFields[Field].DecimalCount;
+end;
+
 Function TDBFFile.GetFieldValues(Field: Integer): variant;
 begin
   Result := FFields[Field].FieldValue;
@@ -219,7 +233,7 @@ begin
   inherited Create;
   FRecordIndex := -1;
   FFileName := FileName;
-  FileStream := TBufferedFileStream.Create(FileName,fmOpenRead or fmShareDenyWrite,32768);
+  FileStream := TBufferedFileStream.Create(FileName,fmOpenRead or fmShareDenyWrite,4096);
   FileReader := TBinaryReader.Create(FileStream,TEncoding.ANSI);
   // Read table file header
   Version := FileReader.ReadByte and 7;
@@ -332,7 +346,7 @@ begin
   end else
     raise Exception.Create('Duplicate Field ' + Fields[field].FFieldName);
   // Open File
-  FileStream := TBufferedFileStream.Create(FileName,fmCreate or fmShareDenyWrite,32768);
+  FileStream := TBufferedFileStream.Create(FileName,fmCreate or fmShareDenyWrite,4096);
   FileWriter := TBinaryWriter.Create(FileStream,TEncoding.ANSI);
   // Write table file header
   FileWriter.Write(#3); // Version
