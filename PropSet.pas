@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  SysUtils,Types,IOUtils,Parse;
+  SysUtils,Types,IOUtils,BaseDir,Parse;
 
 Type
   TPropertySet = record
@@ -21,28 +21,27 @@ Type
       TProperty = record
         Name,Value: string;
       end;
-    Class Var
-      FBaseDirectory: String;
     Var
+      FReadOnly: Boolean;
       FNameValueSeparator: Char;
       FPropertiesSeparator: Char;
       FProperties: array of TProperty;
-    Class Procedure SetBaseDirectory(BaseDir: String); static;
     Function IndexOf(const Name: String): Integer;
     Procedure SetNameValueSeparator(Separator: Char);
     Procedure SetPropertiesSeparator(Separator: Char);
     Function GetNames(Index: Integer): String; inline;
     Function GetValues(const Name: String): String; inline;
+    Procedure SetValues(const Name,Value: String); inline;
     Function GetValueFromIndex(Index: Integer): String;
+    Procedure SetValueFromIndex(Index: Integer; const Value: String);
     Function GetAsString: String;
     Procedure SetAsString(AsString: String);
     Function GetAsStrings: TStringDynArray;
     Procedure SetAsStrings(AsStrings: TStringDynArray);
     Procedure Append(const AsString: String); overload;
   public
+    Class Var BaseDirectory: TBaseDirectory;
     Class Constructor Create;
-    Class Property BaseDirectory: String read FBaseDirectory write SetBaseDirectory;
-    Class Function FullPath(const RelativePath: String): String; static;
   public
     Class Operator Initialize(out PropertySet: TPropertySet);
     Class Operator Assign(var Left: TPropertySet; const [ref] Right: TPropertySet);
@@ -51,6 +50,7 @@ Type
     Class Operator Implicit(Properties: TStringDynArray): TPropertySet;
     Class Operator Implicit(Properties: TPropertySet): TStringDynArray;
   public
+    Property ReadOnly: Boolean read FReadOnly;
     // Separator properties
     Property NameValueSeparator: Char read FNameValueSeparator write SetNameValueSeparator;
     Property PropertiesSeparator: Char read FPropertiesSeparator write SetPropertiesSeparator;
@@ -62,18 +62,22 @@ Type
     Function Contains(const Name: String): Boolean; overload;
     Function Contains(const Name: String; var Value: String): Boolean; overload;
     Property Names[Index: Integer]: String read GetNames;
-    Property Values[const Name: String]: string read GetValues; default;
-    Property ValueFromIndex[Index: Integer]: String read GetValueFromIndex;
+    Property Values[const Name: String]: string read GetValues write SetValues; default;
+    Property ValueFromIndex[Index: Integer]: String read GetValueFromIndex write SetValueFromIndex;
     // Convert property values
     Function ToInt(const Name: String): Integer; overload;
     Function ToInt(const Name: String; Default: Integer): Integer; overload;
     Function ToFloat(const Name: String): Float64; overload;
     Function ToFloat(const Name: String; Default: Float64): Float64; overload;
+    Function ToBool(const Name,FalseStr,TrueStr: String): Boolean; overload;
+    Function ToBool(const Name,FalseStr,TrueStr: String; Default: Boolean): Boolean; overload;
    	Function ToPath(const Name: String): String;
+   	Function ToFileName(const Name: String; MustExist: Boolean): String;
     Function Parse(const Name: String; Delimiter: TDelimiter = Comma): TStringParser;
     // Manage content
-    Constructor Create(NameValueSeparator,PropertiesSeparator: Char); overload;
-    Constructor Create(const [ref] Properties: TPropertySet); overload;
+    Constructor Create(ReadOnly: Boolean); overload;
+    Constructor Create(NameValueSeparator,PropertiesSeparator: Char; ReadOnly: Boolean = false); overload;
+    Constructor Create(const [ref] Properties: TPropertySet; ReadOnly: Boolean = false); overload;
     Procedure Clear;
     Procedure RemoveUnassigned;
     Procedure Append(const Name,Value: String); overload;
@@ -89,29 +93,16 @@ begin
   BaseDirectory := ExtractFileDir(ParamStr(0));
 end;
 
-Class Procedure TPropertySet.SetBaseDirectory(BaseDir: String);
-begin
-  FBaseDirectory := IncludeTrailingPathDelimiter(BaseDir);
-end;
-
-Class Function TPropertySet.FullPath(const RelativePath: String): String;
-// Relative paths are assumed to be relative to the base directory
-// of the property set instead of relative to the current directory
-begin
-  if TPath.IsRelativePath(RelativePath) then
-    Result := ExpandFileName(FBaseDirectory+RelativePath)
-  else
-    Result := RelativePath;
-end;
-
 Class Operator TPropertySet.Initialize(out PropertySet: TPropertySet);
 begin
+  PropertySet.FReadOnly := false;
   PropertySet.FNameValueSeparator := '=';
   PropertySet.FPropertiesSeparator := ';';
 end;
 
 Class Operator TPropertySet.Assign(var Left: TPropertySet; const [ref] Right: TPropertySet);
 begin
+  Left.FReadOnly := Right.FReadOnly;
   Left.FNameValueSeparator := Right.FNameValueSeparator;
   Left.FPropertiesSeparator := Right.FPropertiesSeparator;
   Left.FProperties := Copy(Right.FProperties);
@@ -137,15 +128,23 @@ begin
   Result := Properties.AsStrings;
 end;
 
-Constructor TPropertySet.Create(NameValueSeparator,PropertiesSeparator: Char);
+Constructor TPropertySet.Create(ReadOnly: Boolean);
 begin
-  FNameValueSeparator := NameValueSeparator;
-  FPropertiesSeparator := PropertiesSeparator;
-  FProperties := nil;
+  FReadOnly := ReadOnly;
+  Finalize(FProperties);
 end;
 
-Constructor TPropertySet.Create(const [ref] Properties: TPropertySet);
+Constructor TPropertySet.Create(NameValueSeparator,PropertiesSeparator: Char; ReadOnly: Boolean = false);
 begin
+  FReadOnly := ReadOnly;
+  FNameValueSeparator := NameValueSeparator;
+  FPropertiesSeparator := PropertiesSeparator;
+  Finalize(FProperties);
+end;
+
+Constructor TPropertySet.Create(const [ref] Properties: TPropertySet; ReadOnly: Boolean = false);
+begin
+  FReadOnly := ReadOnly;
   FNameValueSeparator := Properties.FNameValueSeparator;
   FPropertiesSeparator := Properties.FPropertiesSeparator;
   FProperties := Copy(Properties.FProperties);
@@ -184,9 +183,30 @@ begin
   Contains(Name,Result);
 end;
 
+Procedure TPropertySet.SetValues(const Name,Value: String);
+begin
+  if not FReadOnly then
+  begin
+    var Index := IndexOf(Name);
+    if Index >= 0 then
+      FProperties[Index].Value := Value
+    else
+      raise Exception.Create('Property does not exist (' + Name + ')');
+  end else
+    raise Exception.Create('Cannot modify a read only property set');
+end;
+
 Function TPropertySet.GetValueFromIndex(Index: Integer): String;
 begin
   Result := FProperties[Index].Value;
+end;
+
+Procedure TPropertySet.SetValueFromIndex(Index: Integer; const Value: String);
+begin
+  if not FReadOnly then
+    FProperties[Index].Value := Value
+  else
+    raise Exception.Create('Cannot modify a read only property set');
 end;
 
 Function TPropertySet.GetAsString: String;
@@ -304,9 +324,36 @@ begin
     Result := Default;
 end;
 
+Function TPropertySet.ToBool(const Name,FalseStr,TrueStr: String): Boolean;
+begin
+  var Value := GetValues(Name);
+  if SameText(Value,FalseStr) then Result := false else
+  if SameText(Value,TrueStr) then Result := true else
+  raise Exception.Create('Invalid boolean value (' + Name + ')');
+end;
+
+Function TPropertySet.ToBool(const Name,FalseStr,TrueStr: String; Default: Boolean): Boolean;
+Var
+  Value: String;
+begin
+  if Contains(Name,Value) then
+  begin
+    if SameText(Value,FalseStr) then Result := false else
+    if SameText(Value,TrueStr) then Result := true else
+    raise Exception.Create('Invalid boolean value (' + Name + ')')
+  end else
+    Result := Default;
+end;
+
 Function TPropertySet.ToPath(const Name: String): String;
 begin
-  if Contains(Name,Result) then Result := FullPath(Result);
+  if Contains(Name,Result) then Result := BaseDirectory.AbsolutePath(Result);
+end;
+
+Function TPropertySet.ToFileName(const Name: String; MustExist: Boolean): String;
+begin
+  Result := ToPath(Name);
+  if MustExist and not FileExists(Result) then raise Exception.Create('File does not exist (' + Name + ')');
 end;
 
 Function TPropertySet.Parse(const Name: String; Delimiter: TDelimiter = Comma): TStringParser;

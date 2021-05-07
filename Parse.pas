@@ -43,6 +43,8 @@ Type
     Function GetExcludeEmpty: Boolean;
     Procedure SetExcludeEmpty(ExcludeEmpty: Boolean);
     Function GetTokens(Token: Integer): TToken; inline;
+    Function GetStr(Token: Integer): String; inline;
+    Function GetByte(Token: Integer): Byte; inline;
     Function GetInt(Token: Integer): Integer; inline;
     Function GetInt64(Token: Integer): Int64; inline;
     Function GetFloat(Token: Integer): Float64; inline;
@@ -69,6 +71,8 @@ Type
     // Query Tokens
     Function Count: Integer; inline;
     Property Tokens[Token: Integer]: TToken read GetTokens; default;
+    Property Str[Token: Integer]: String read GetStr;
+    Property Byte[Token: Integer]: Byte read GetByte;
     Property Int[Token: Integer]: Integer read GetInt;
     Property Int64[Token: Integer]: Int64 read GetInt64;
     Property Float[Token: Integer]: Float64 read GetFloat;
@@ -87,6 +91,8 @@ Type
     FTokens: TArray<String>;
     Widths: TArray<Integer>;
     Function GetTokens(Token: Integer): TToken; inline;
+    Function GetInt(Token: Integer): Integer; inline;
+    Function GetFloat(Token: Integer): Float64; inline;
   public
     // Initialization
     Constructor Create(const FixedWidths: array of Integer);
@@ -97,6 +103,8 @@ Type
     // Query Tokens
     Function Count: Integer; inline;
     Property Tokens[Token: Integer]: TToken read GetTokens; default;
+    Property Int[Token: Integer]: Integer read GetInt;
+    Property Float[Token: Integer]: Float64 read GetFloat;
   end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,6 +180,16 @@ end;
 Function TStringParser.GetTokens(Token: Integer): TToken;
 begin
   Result.FValue := FTokens[Token];
+end;
+
+Function TStringParser.GetStr(Token: Integer): String;
+begin
+  Result := FTokens[Token];
+end;
+
+Function TStringParser.GetByte(Token: Integer): Byte;
+begin
+  Result := FTokens[Token].ToInteger;
 end;
 
 Function TStringParser.GetInt(Token: Integer): Integer;
@@ -346,6 +364,16 @@ end;
 Function TFixedWidthParser.GetTokens(Token: Integer): TToken;
 begin
   Result.FValue := FTokens[Token];
+end;
+
+Function TFixedWidthParser.GetInt(Token: Integer): Integer;
+begin
+  Result := Trim(FTokens[Token]).ToInteger;
+end;
+
+Function TFixedWidthParser.GetFloat(Token: Integer): Float64;
+begin
+  Result := Trim(FTokens[Token]).ToDouble;
 end;
 
 Procedure TFixedWidthParser.Assign(Line: String);
