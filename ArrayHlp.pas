@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  Math;
+  SysUtils,Math,System.Generics.Collections;
 
 Type
   TIntArrayHelper = record helper for TArray<Integer>
@@ -20,13 +20,17 @@ Type
     Function GetLength: Integer; inline;
     Procedure SetLength(Length: Integer); inline;
   public
-    Constructor Create(const Values: array of Integer);
+    Constructor Create(const Values: array of Integer); overload;
+    Constructor Create(const Length: Integer; Value: Integer = 0); overload;
+    Function ToString(const Separator: Char = ','): String;
     Procedure Initialize(Value: Integer);
     Procedure Assign(const Values: array of Integer);
     Procedure Append(const Values: array of Integer);
+    Function Contains(Value: Integer): Boolean;
     Function  MinValue: Integer;
     Function  MaxValue: Integer;
     Function  Total: Integer;
+    Procedure Sort;
   public
     Property Length: Integer read GetLength write SetLength;
   end;
@@ -36,7 +40,9 @@ Type
     Function GetLength: Integer; inline;
     Procedure SetLength(Length: Integer); inline;
   public
-    Constructor Create(const Values: array of Float64);
+    Constructor Create(const Values: array of Float64); overload;
+    Constructor Create(const Length: Integer; Value: Float64 = 0.0); overload;
+    Function ToString(const Format: String; const Separator: Char = ','): String;
     Procedure Initialize(Value: Float64);
     Procedure Assign(const Values: array of Float64);
     Procedure Append(const Values: array of Float64);
@@ -68,6 +74,22 @@ begin
   Assign(Values)
 end;
 
+Constructor TIntArrayHelper.Create(const Length: Integer; Value: Integer = 0);
+begin
+  System.SetLength(Self,Length);
+  for var Index := 0 to Length-1 do Self[Index] := Value;
+end;
+
+Function TIntArrayHelper.ToString(const Separator: Char = ','): String;
+begin
+  if Self.Length > 0 then
+  begin
+    Result := Self[0].ToString;
+    for var Index := 1 to Length-1 do Result := Result + Separator + Self[Index].ToString;
+  end else
+    Result := '';
+end;
+
 Function TIntArrayHelper.GetLength: Integer;
 begin
   Result := System.Length(Self);
@@ -96,6 +118,13 @@ begin
   for var Index := Offset to Length-1 do Self[Index] := Values[Index-Offset];
 end;
 
+Function TIntArrayHelper.Contains(Value: Integer): Boolean;
+begin
+  Result := false;
+  for var Index := 0 to Length-1 do
+  if Self[Index] = Value then Exit(true);
+end;
+
 Function TIntArrayHelper.MinValue: Integer;
 begin
   Result := MinIntValue(Self);
@@ -112,11 +141,32 @@ begin
   for var Index := 0 to Length-1 do Result := Result  + Self[Index];
 end;
 
+Procedure TIntArrayHelper.Sort;
+begin
+  System.Generics.Collections.TArray.Sort<Integer>(Self);
+end;
+
 ////////////////////////////////////////////////////////////////////////////////
 
 Constructor TFloat64ArrayHelper.Create(const Values: array of Float64);
 begin
   Assign(Values)
+end;
+
+Constructor TFloat64ArrayHelper.Create(const Length: Integer; Value: Float64 = 0.0);
+begin
+  System.SetLength(Self,Length);
+  for var Index := 0 to Length-1 do Self[Index] := Value;
+end;
+
+Function TFloat64ArrayHelper.ToString(const Format: String; const Separator: Char = ','): String;
+begin
+  if Self.Length > 0 then
+  begin
+    Result := FormatFloat(Format,Self[0]);
+    for var Index := 1 to Length-1 do Result := Result + Separator + FormatFloat(Format,Self[Index]);
+  end else
+    Result := '';
 end;
 
 Function TFloat64ArrayHelper.GetLength: Integer;

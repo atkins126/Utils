@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  System.Classes,System.SysUtils,ArrayBld;
+  Classes,SysUtils,Generics.Collections,ArrayBld;
 
 Type
   TDBFField = record
@@ -28,6 +28,9 @@ Type
     Procedure SetDecimalCount(Value: Byte);
     Procedure SetFieldFormat;
     Procedure Validate;
+  public
+    Constructor Create(const FieldName: String; const FieldType: Char;
+                       const FieldLength,DecimalCount: Byte);
   public
     Property FieldName: String read FFieldName write SetFieldName;
     Property FieldType: Char read FFieldType write SetFieldType;
@@ -46,10 +49,13 @@ Type
     Function GetFieldTypes(Field: Integer): Char;
     Function GetFieldLength(Field: Integer): Byte;
     Function GetDecimalCount(Field: Integer): Byte;
+    Function GetPairs(Field: Integer): TPair<String,Variant>; overload;
     Function GetFieldValues(Field: Integer): Variant;
   public
     Constructor Create;
-    Function IndexOf(const FieldName: String): Integer;
+    Function IndexOf(const FieldName: String; const MustExist: Boolean = false): Integer;
+    Function GetFields: TArray<TDBFField>;
+    Function GetPairs: TArray<TPair<String,Variant>>; overload;
   public
     Property FileName: String read FFileName;
     Property FieldCount: Integer read FFieldCount;
@@ -58,6 +64,7 @@ Type
     Property FieldTypes[Field: Integer]: Char read GetFieldTypes;
     Property FieldLength[Field: Integer]: Byte read GetFieldLength;
     Property DecimalCount[Field: Integer]: Byte read GetDecimalCount;
+    Property Pairs[Field: Integer]: TPair<String,Variant> read GetPairs;
     Property FieldValues[Field: Integer]: Variant read GetFieldValues; default;
   end;
 
@@ -81,7 +88,8 @@ Type
   public
     Constructor Create(const FileName: String; const Fields: array of TDBFField); overload;
     Constructor Create(const FileName: String; const DBFFile: TDBFFile); overload;
-    Procedure AppendRecord;
+    Procedure AppendRecord; overload;
+    Procedure AppendRecord(const Values: array of Variant); overload;
     Destructor Destroy; override;
   public
     Property FieldValues[Field: Integer]: Variant read GetFieldValues write SetFieldValues; default;
@@ -90,6 +98,15 @@ Type
 ////////////////////////////////////////////////////////////////////////////////
 implementation
 ////////////////////////////////////////////////////////////////////////////////
+
+Constructor TDBFField.Create(const FieldName: String; const FieldType: Char;
+                             const FieldLength,DecimalCount: Byte);
+begin
+  SetFieldName(FieldName);
+  SetFieldType(FieldType);
+  SetFieldLength(FieldLength);
+  SetDecimalCount(DecimalCount);
+end;
 
 Procedure TDBFField.SetFieldName(Value: string);
 begin
@@ -128,6 +145,14 @@ begin
              FFieldLength := 10;
              FDecimalCount := 0;
            end;
+      'I': begin
+             FFieldLength := 4;
+             FDecimalCount := 0;
+           end;
+      'O': begin
+             FFieldLength := 8;
+             FDecimalCount := 0;
+           end;
       else raise Exception.Create('Unsupported Field Type ' + Value);
     end;
   end;
@@ -138,17 +163,22 @@ begin
   if Value <> FFieldLength then
   begin
     FFieldLength := Value;
-    case FFieldType of
-      'C': if Value > 254 then raise Exception.Create('Invalid Field Length');
-      'D': if Value <> 8 then raise Exception.Create('Invalid Field Length');
-      'L': if Value <> 1 then raise Exception.Create('Invalid Field Length');
-      'F','N':
-           begin
-             if Value > 20 then raise Exception.Create('Invalid Field Length') else
-             if Value < FDecimalCount+2 then raise Exception.Create('Field Length too small');
-             SetFieldFormat;
-           end;
-    end;
+    if Value > 0 then
+      case FFieldType of
+        'C': if Value > 254 then raise Exception.Create('Invalid Field Length');
+        'D': if Value <> 8 then raise Exception.Create('Invalid Field Length');
+        'L': if Value <> 1 then raise Exception.Create('Invalid Field Length');
+        'F','N':
+             begin
+               if Value > 20 then raise Exception.Create('Invalid Field Length') else
+               if (FDecimalCount > 0) and (Value < FDecimalCount+2) then raise Exception.Create('Invalid Field Length');
+               SetFieldFormat;
+             end;
+        'I': if Value <> 4 then raise Exception.Create('Invalid Field Length');
+        'O': if Value <> 8 then raise Exception.Create('Invalid Field Length');
+      end
+    else
+      raise Exception.Create('Invalid Field Length');
   end;
 end;
 
@@ -215,15 +245,29 @@ begin
   Result := FFields[Field].FieldValue;
 end;
 
-Function TDBFFile.IndexOf(const FieldName: String): Integer;
+Function TDBFFile.GetPairs(Field: Integer): TPair<String,Variant>;
+begin
+  Result.Key := FFields[Field].FFieldName;
+  Result.Value := FFields[Field].FieldValue;
+end;
+
+Function TDBFFile.IndexOf(const FieldName: String; const MustExist: Boolean = false): Integer;
 begin
   Result := -1;
   for var Field := 0 to FFieldCount-1 do
-  if SameText(FFields[Field].FFieldName,FieldName) then
-  begin
-    Result := Field;
-    Break;
-  end;
+  if SameText(FFields[Field].FFieldName,FieldName) then Exit(Field);
+  if MustExist then raise Exception.Create('Unknown field ' + FieldName + ' in ' + FFileName);
+end;
+
+Function TDBFFile.GetFields: TArray<TDBFField>;
+begin
+  Result := Copy(FFields);
+end;
+
+Function TDBFFile.GetPairs: TArray<TPair<String,Variant>>;
+begin
+  SetLength(Result,FFieldCount);
+  for var Field := 0 to FFieldCount-1 do Result[Field] := GetPairs(Field);
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -280,38 +324,45 @@ begin
       DeletedRecord := (FileReader.ReadChar = '*');
       for var Field := 0 to FFieldCount-1 do
       begin
-        var FieldValue := '';
-        for var FieldChar := 1 to FFields[Field].FFieldLength do FieldValue := FieldValue + FileReader.ReadChar;
         case FFields[Field].FFieldType of
-          'C': FFields[Field].FieldValue := Trim(FieldValue);
-          'D': begin
-                 var Year := Copy(FieldValue,1,4).ToInteger;
-                 var Month := Copy(FieldValue,5,2).ToInteger;
-                 var Day := Copy(FieldValue,7,2).ToInteger;
-                 FFields[Field].FieldValue := EncodeDate(Year,Month,Day);
-               end;
-          'L': if (FieldValue='T') or (FieldValue='t') or (FieldValue='Y') or (FieldValue='y') then
-               begin
-                 FFields[Field].FieldValue := true;
-               end else
-               if (FieldValue='F') or (FieldValue='f') or (FieldValue='N') or (FieldValue='n') then
-               begin
-                 FFields[Field].FieldValue := false;
-               end else
-               if FieldValue = '?' then VarClear(FFields[Field].FieldValue) else
-                 raise Exception.Create('Invalid field value (' + FFields[Field].FFieldName +')');
-          'F','N':
-               begin
-                 FieldValue := Trim(FieldValue);
-                 if FieldValue = '' then
-                   VarClear(FFields[Field].FieldValue)
-                 else
-                   if FFields[Field].FDecimalCount = 0 then
-                     FFields[Field].FieldValue := StrToInt(FieldValue)
-                   else
-                     FFields[Field].FieldValue := StrToFloat(FieldValue,FormatSettings);
-               end;
-          else VarClear(FFields[Field].FieldValue);
+          'I': FFields[Field].FieldValue := FileReader.ReadInt32;
+          'O': FFields[Field].FieldValue := FileReader.ReadDouble;
+          else
+            begin
+              var FieldValue := '';
+              for var FieldChar := 1 to FFields[Field].FFieldLength do FieldValue := FieldValue + FileReader.ReadChar;
+              case FFields[Field].FFieldType of
+                'C': FFields[Field].FieldValue := Trim(FieldValue);
+                'D': begin
+                       var Year := Copy(FieldValue,1,4).ToInteger;
+                       var Month := Copy(FieldValue,5,2).ToInteger;
+                       var Day := Copy(FieldValue,7,2).ToInteger;
+                       FFields[Field].FieldValue := EncodeDate(Year,Month,Day);
+                     end;
+                'L': if (FieldValue='T') or (FieldValue='t') or (FieldValue='Y') or (FieldValue='y') then
+                     begin
+                       FFields[Field].FieldValue := true;
+                     end else
+                     if (FieldValue='F') or (FieldValue='f') or (FieldValue='N') or (FieldValue='n') then
+                     begin
+                       FFields[Field].FieldValue := false;
+                     end else
+                     if FieldValue = '?' then VarClear(FFields[Field].FieldValue) else
+                       raise Exception.Create('Invalid field value (' + FFields[Field].FFieldName +')');
+                'F','N':
+                     begin
+                       FieldValue := Trim(FieldValue);
+                       if FieldValue = '' then
+                         VarClear(FFields[Field].FieldValue)
+                       else
+                         if FFields[Field].FDecimalCount = 0 then
+                           FFields[Field].FieldValue := StrToInt(FieldValue)
+                         else
+                           FFields[Field].FieldValue := StrToFloat(FieldValue,FormatSettings);
+                     end;
+                else VarClear(FFields[Field].FieldValue);
+              end;
+            end;
         end;
       end;
     until not DeletedRecord;
@@ -426,7 +477,17 @@ begin
              if Length(Text) = FFields[Field].FieldLength then
                FileWriter.Write(Text.ToCharArray)
              else
-               raise Exception.Create('Numeric value out of range');
+               raise Exception.Create('Numeric value out of range (field=' +
+                                      FFields[Field].FFieldName + '; value=' +
+                                      Value.ToString + ')');
+           end;
+      'I': begin
+             var Value: Integer := FFields[Field].FieldValue;
+             FileWriter.Write(Value);
+           end;
+      'O': begin
+             var Value: Float64 := FFields[Field].FieldValue;
+             FileWriter.Write(Value);
            end;
       else raise Exception.Create('Unsupported field type');
     end;
@@ -435,15 +496,28 @@ begin
   Inc(FRecordCount);
 end;
 
+Procedure TDBFWriter.AppendRecord(const Values: array of Variant);
+begin
+  if Length(Values) = FFieldCount then
+  begin
+    for var Field := 0 to FFieldCount-1 do SetFieldValues(Field,Values[Field]);
+    AppendRecord;
+  end else
+    raise Exception.Create('Invalid number of fields');
+end;
+
 Destructor TDBFWriter.Destroy;
 begin
   // Write eof marker
   var EOF: Byte := 26;
-  FileWriter.Write(EOF);
+  if FileWriter <> nil then FileWriter.Write(EOF);
   // Update record count
-  FileStream.FlushBuffer;
-  FileStream.Position := 4;
-  FileWriter.Write(RecordCount);
+  if FileStream <> nil then
+  begin
+    FileStream.FlushBuffer;
+    FileStream.Position := 4;
+    FileWriter.Write(RecordCount);
+  end;
   // Close file
   FileWriter.Free;
   FileStream.Free;
