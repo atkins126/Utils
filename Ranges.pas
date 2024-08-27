@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  SysUtils, Parse;
+  SysUtils, Parse, ArrayHlp;
 
 Type
   TRange = record
@@ -22,6 +22,7 @@ Type
     Constructor Create(const Min,Max: Integer);
     Function Count: Integer;
     Function Contains(const Value: Integer): Boolean;
+    Function Values: TArray<Integer>;
     Function Split(NRanges: Integer): TArray<TRange>;
   public
     Property Min: Integer read FMin;
@@ -33,12 +34,17 @@ Type
     FRanges: array of TRange;
     Function GetRanges(Range: Integer): TRange; inline;
   public
+    Class Operator Implicit(const Values: array of Integer): TRanges;
     Class Operator Implicit(Ranges: String): TRanges;
     Class Operator Implicit(Ranges: TRanges): String;
   public
-    Constructor Create(const Ranges: string);
+    Constructor Create(const Values: array of Integer); overload;
+    Constructor Create(const Ranges: array of TRange); overload;
+    Constructor Create(const Ranges: string); overload;
     Function Count: Integer;
     Function Contains(const Value: Integer): Boolean;
+    Function Values: TArray<Integer>;
+    Function AsString: String;
   public
     Property Ranges[Range: Integer]: TRange read GetRanges; default;
   end;
@@ -67,6 +73,12 @@ begin
   Result := (Value >= FMin) and (Value <= FMax);
 end;
 
+Function TRange.Values: TArray<Integer>;
+begin
+  SetLength(Result,Count);
+  for var Value := Min to Max do Result[Value-Min] := Value;
+end;
+
 Function TRange.Split(NRanges: Integer): TArray<TRange>;
 begin
   // Ensure each range has at least 1 element
@@ -90,6 +102,33 @@ end;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+Class Operator TRanges.Implicit(const Values: array of Integer): TRanges;
+begin
+  if Length(Values) > 0 then
+  begin
+    var Arr := TArray<Integer>.Create(Values);
+    // Sort values
+    Arr.Sort;
+    // Initialize first range
+    var Value := Arr[0];
+    var Range := TRange.Create(Value,Value);
+    // Iterate values
+    for var Index := 1 to Arr.Length-1 do
+    if Arr[Index] = Value+1 then Inc(Value) else
+    begin
+      // Finalize range
+      Range.FMax := Arr[Index-1];
+      Result.FRanges := Result.FRanges + [Range];
+      // Initialize next range
+      Value := Arr[Index];
+      Range.FMin := Value;
+    end;
+    // Finalize last range
+    Range.FMax := Arr[Arr.Length-1];
+    Result.FRanges := Result.FRanges + [Range];
+  end;
+end;
+
 Class Operator TRanges.Implicit(Ranges: String): TRanges;
 begin
   var Parser := TStringParser.Create(Comma,Ranges);
@@ -112,16 +151,18 @@ end;
 
 Class Operator TRanges.Implicit(Ranges: TRanges): String;
 begin
-  Result := '';
-  var Separator := '';
-  for var Range := 0 to Ranges.Count-1 do
-  begin
-    if Ranges[Range].Count = 1 then
-      Result := Result + Separator + Ranges[Range].FMin.ToString
-    else
-      Result := Result + Separator + Ranges[Range].FMin.ToString + '-' + Ranges[Range].FMax.ToString;
-    Separator := ',';
-  end;
+  Result := Ranges.AsString;
+end;
+
+Constructor TRanges.Create(const Values: array of Integer);
+begin
+  Self := Values;
+end;
+
+Constructor TRanges.Create(const Ranges: array of TRange);
+begin
+  SetLength(FRanges,Length(Ranges));
+  for var Range := low(Ranges) to high(Ranges) do FRanges[Range] := Ranges[Range];
 end;
 
 Constructor TRanges.Create(const Ranges: string);
@@ -144,6 +185,29 @@ begin
   Result := false;
   for var Range := 0 to Count-1 do
   if FRanges[Range].Contains(Value) then Exit(true);
+end;
+
+Function TRanges.Values: TArray<Integer>;
+begin
+  Result := [];
+  for var Range := 0 to Count-1 do Result := Result + FRanges[Range].Values;
+end;
+
+Function TRanges.AsString: string;
+begin
+  Result := '';
+  var Separator := '';
+  for var Range := 0 to Count-1 do
+  begin
+    if FRanges[Range].Count = 1 then
+      Result := Result + Separator + FRanges[Range].FMin.ToString
+    else
+      if FRanges[Range].FMax = FRanges[Range].FMin+1 then
+        Result := Result + Separator + FRanges[Range].FMin.ToString + ',' + FRanges[Range].FMax.ToString
+      else
+        Result := Result + Separator + FRanges[Range].FMin.ToString + '-' + FRanges[Range].FMax.ToString;
+    Separator := ',';
+  end;
 end;
 
 end.

@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  Classes,SysUtils,ArrayBld;
+  Classes, SysUtils, ArrayBld, VarPtr;
 
 Type
   TToken = record
@@ -24,6 +24,7 @@ Type
     Class Operator Implicit(Token: TToken): Int64;
     Class Operator Implicit(Token: TToken): Float32;
     Class Operator Implicit(Token: TToken): Float64;
+    Class Operator Implicit(Token: TToken): Variant;
   public
     Function ToChar: Char; inline;
     Function ToInt: Integer; inline;
@@ -64,14 +65,22 @@ Type
     Procedure SpaceDelimited;
     Procedure SemicolonDelimited;
     // Manage content
-    Constructor Create(Delimiter: TDelimiter; const Line: String = '');
+    Constructor Create(Delimiter: TDelimiter; const Line: String = ''); overload;
+    Constructor Create(Delimiter: TDelimiter; const Line: String; const Quote: Char); overload;
+    Procedure RemoveTrailingEmpties;
+    Procedure TrimTokens;
     Procedure Clear;
     Procedure Assign(const Line: String); overload;
     Procedure Assign(const Line: String; Quote: Char); overload;
     Procedure ReadLine(var TextFile: TextFile); overload;
     Procedure ReadLine(const TextReader: TTextReader); overload;
+    Procedure ReadLine(const TextReader: TTextReader; Quote: Char); overload;
     // Query Tokens
     Function Count: Integer; inline;
+    Function IndexOf(const Token: String; Offset: Integer = 0): Integer;
+    Procedure AssignTo(var Tokens: array of Integer; FromToken: Integer = 0); overload;
+    Procedure AssignTo(var Tokens: array of Float64; FromToken: Integer = 0); overload;
+    Procedure AssignToVar(const Tokens: array of TVarPointer; FromToken: Integer = 0);
     Property Tokens[Token: Integer]: TToken read GetTokens; default;
     Property Char[Token: Integer]: Char read GetChar;
     Property Str[Token: Integer]: String read GetStr;
@@ -143,6 +152,11 @@ end;
 Class Operator TToken.Implicit(Token: TToken): Float64;
 begin
   Result := Token.Value.ToDouble;
+end;
+
+Class Operator TToken.Implicit(Token: TToken): Variant;
+begin
+  Result := Token.Value;
 end;
 
 Function TToken.ToChar: Char;
@@ -302,6 +316,31 @@ begin
   Assign(Line);
 end;
 
+Constructor TStringParser.Create(Delimiter: TDelimiter; const Line: String; const Quote: Char);
+begin
+  // Initialize
+  case Delimiter of
+    Comma: CSV;
+    Tab: TabDelimited;
+    SemiColon: SemicolonDelimited;
+    Space: SpaceDelimited;
+  end;
+  // Assign content
+  Assign(Line,Quote);
+end;
+
+Procedure TStringParser.RemoveTrailingEmpties;
+begin
+  var Index := Count-1;
+  while (Index >= 0) and (FTokens[Index] = '') do Dec(Index);
+  SetLength(FTokens,Index+1);
+end;
+
+Procedure TStringParser.TrimTokens;
+begin
+  for var Token := 0 to Count-1 do FTokens[Token] := Trim(FTokens[Token]);
+end;
+
 Procedure TStringParser.Clear;
 begin
   FTokens := nil;
@@ -330,9 +369,56 @@ begin
   Assign(TextReader.ReadLine);
 end;
 
+Procedure TStringParser.ReadLine(const TextReader: TTextReader; Quote: Char);
+begin
+  Assign(TextReader.ReadLine,Quote);
+end;
+
 Function TStringParser.Count: Integer;
 begin
   Result := Length(FTokens);
+end;
+
+Function TStringParser.IndexOf(const Token: String; Offset: Integer = 0): Integer;
+begin
+  Result := -1;
+  for var Index := Offset to Count-1 do
+  if SameText(FTokens[Index],Token) then Exit(Index);
+end;
+
+Procedure TStringParser.AssignTo(var Tokens: array of Integer; FromToken: Integer = 0);
+begin
+  for var Token := low(Tokens) to high(Tokens) do
+  begin
+    Tokens[Token] := Int[FromToken];
+    Inc(FromToken);
+  end;
+end;
+
+Procedure TStringParser.AssignTo(var Tokens: array of Float64; FromToken: Integer = 0);
+begin
+  for var Token := low(Tokens) to high(Tokens) do
+  begin
+    Tokens[Token] := Float[FromToken];
+    Inc(FromToken);
+  end;
+end;
+
+Procedure TStringParser.AssignToVar(const Tokens: array of TVarPointer; FromToken: Integer = 0);
+begin
+  for var Token := low(Tokens) to high(Tokens) do
+  begin
+    case Tokens[Token].VarType of
+      vtByte: Tokens[Token].AsByte := Int[FromToken];
+      vtInt16: Tokens[Token].AsInt16 := Int[FromToken];
+      vtInt32: Tokens[Token].AsInt32 := Int[FromToken];
+      vtInt64: Tokens[Token].AsInt64 := Int64[FromToken];
+      vtFloat32: Tokens[Token].AsFloat32 := Float[FromToken];
+      vtFloat64: Tokens[Token].AsFloat64 := Float[FromToken];
+      else raise Exception.Create('Unsupported var-tyep');
+    end;
+    Inc(FromToken);
+  end;
 end;
 
 Function TStringParser.ToStrArray: TArray<String>;

@@ -12,7 +12,7 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  SysUtils,IOUtils,DateUtils,Classes,Parse;
+  SysUtils, Classes, Windows, Math, IOUtils, DateUtils, Parse;
 
 Type
   TLogEvent = Procedure(Sender: TObject; const Line: String) of Object;
@@ -28,22 +28,28 @@ Type
     Var
       LogEvent: TLogEvent;
       StartTime: TDateTime;
-      ConsoleMessages: Boolean;
+      Console: Boolean;
+      ConsoleWidth: Integer;
       LogStream: TFileStream;
       LogWriter: TStreamWriter;
       InputFiles,OutputFiles: array of TFileInfo;
     Function ShortenPath(const Path: string): string;
     Function FileProperties(const FileName: string): string;
     Function FileInfo(const FileName: string; NameOnly: Boolean): string;
-    Function VarRecToStr(VarRec: TVarRec; Decimals: Integer): String;
+    Function VarRecToStr(VarRec: TVarRec; NDecimals: Integer): String;
   public
-    Constructor Create(const LogFileName: String; const Echo: Boolean = true;
-                       const Append: Boolean = false; const OnLog: TLogEvent = nil);
+    Constructor Create(const OnLog: TLogEvent = nil); overload;
+    Constructor Create(const LogFileName: String;
+                       const Echo: Boolean = false;
+                       const Append: Boolean = false;
+                       const OnAppend: TNotifyEvent = nil;
+                       const OnLog: TLogEvent = nil); overload;
     Procedure Log(const Line: String = ''); overload;
     Procedure Log(const Columns: array of String; const ColumnWidths: Integer); overload;
-    Procedure Log(const Columns: array of Const; const ColumnWidths, Decimals: Integer); overload;
     Procedure Log(const Columns: array of String; const ColumnWidths: array of Integer); overload;
-    Procedure Log(const Columns: array of Const; const ColumnWidths: array of Integer; Decimals: Integer); overload;
+    Procedure Log(const Columns: array of const; const ColumnWidths, NDecimals: Integer); overload;
+    Procedure Log(const Columns: array of const; const ColumnWidths: array of Integer; const NDecimals: Integer); overload;
+    Procedure Log(const Columns: array of const; const ColumnWidths,NDecimals: array of Integer); overload;
     Procedure Log(const Error: Exception); overload;
     Procedure Log(const FileLabel,FileName: String); overload;
     Procedure LogFileContent(const FileName: String);
@@ -60,20 +66,50 @@ Var
 implementation
 ////////////////////////////////////////////////////////////////////////////////
 
-Constructor TLogFile.Create(const LogFileName: String; const Echo: Boolean = true;
-                            const Append: Boolean = false; const OnLog: TLogEvent = nil);
+Constructor TLogFile.Create(const OnLog: TLogEvent = nil);
+var
+  CBI: TConsoleScreenBufferInfo;
+begin
+  LogEvent := OnLog;
+  Console := IsConsole;
+  if Console then
+  begin
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE),CBI);
+    ConsoleWidth := CBI.dwSize.X;
+  end;
+  StartTime := Now;
+  Log('START ' + DateTimeToStr(StartTime));
+  Log('Executable: ' + FileInfo(ParamStr(0),true));
+  Log('Computer: ' + GetEnvironmentVariable('COMPUTERNAME'));
+end;
+
+Constructor TLogFile.Create(const LogFileName: String;
+                            const Echo: Boolean = false;
+                            const Append: Boolean = false;
+                            const OnAppend: TNotifyEvent = nil;
+                            const OnLog: TLogEvent = nil);
+var
+  CBI: TConsoleScreenBufferInfo;
 begin
   inherited Create;
   LogEvent := OnLog;
-  ConsoleMessages := IsConsole and Echo;
-  if Append then
+  Console := IsConsole and Echo;
+  if Console then
+  begin
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE),CBI);
+    ConsoleWidth := CBI.dwSize.X;
+  end;
+  if FileExists(LogFileName) and Append then
   begin
     LogStream := TFileStream.Create(LogFileName,fmOpenWrite or fmShareDenyWrite);
     LogStream.Seek(0,soEnd);
+    LogWriter := TStreamWriter.Create(LogStream,TEncoding.ASCII,4096);
+    if Assigned(OnAppend) then OnAppend(Self);
   end else
+  begin
     LogStream := TFileStream.Create(LogFileName,fmCreate or fmShareDenyWrite);
-  LogWriter := TStreamWriter.Create(LogStream,TEncoding.ASCII,4096);
-  if Append and (LogStream.Size > 0) then LOGWriter.WriteLine;
+    LogWriter := TStreamWriter.Create(LogStream,TEncoding.ASCII,4096);
+  end;
   StartTime := Now;
   Log('START ' + DateTimeToStr(StartTime));
   Log('Executable: ' + FileInfo(ParamStr(0),true));
@@ -113,13 +149,13 @@ begin
   Result := Result + '; ' +  FileProperties(FileName);
 end;
 
-Function TLogFile.VarRecToStr(VarRec: TVarRec; Decimals: Integer): String;
+Function TLogFile.VarRecToStr(VarRec: TVarRec; NDecimals: Integer): String;
 begin
   case VarRec.VType of
     vtInteger:       Result := VarRec.VInteger.ToString;
     vtInt64:         Result := VarRec.VInt64^.ToString;
     vtChar:          Result := VarRec.VChar;
-    vtExtended:      Result := FloatToStrF(VarRec.vExtended^,ffFixed,15,Decimals);
+    vtExtended:      Result := FloatToStrF(VarRec.vExtended^,ffFixed,15,NDecimals);
     vtString:        Result := VarRec.VString^;
     vtUnicodeString: Result := String(VarRec.VUnicodeString);
     vtPChar:         Result := VarRec.VPChar;
@@ -132,7 +168,11 @@ end;
 
 Procedure TLogFile.Log(const Line: String = '');
 begin
-  if ConsoleMessages then writeln(Line);
+  if Console then
+  if Line.Length <= ConsoleWidth then
+    writeln(Line)
+  else
+    write(Copy(Line,1,ConsoleWidth));
   if LogWriter <> nil then LogWriter.WriteLine(Line);
   if Assigned(LogEvent) then TThread.Synchronize(nil,Procedure
                                                      begin
@@ -152,15 +192,6 @@ begin
   Log(Line);
 end;
 
-Procedure TLogFile.Log(const Columns: array of Const; const ColumnWidths, Decimals: Integer);
-Var
-  StringColumns: array of String;
-begin
-  SetLength(StringColumns,Length(Columns));
-  for var Column := low(Columns) to high(Columns) do StringColumns[Column] := VarRecToStr(Columns[Column],Decimals);
-  Log(StringColumns,ColumnWidths);
-end;
-
 Procedure TLogFile.Log(const Columns: array of String; const ColumnWidths: array of Integer);
 begin
   if Length(Columns) = Length(ColumnWidths) then
@@ -178,12 +209,29 @@ begin
     raise Exception.Create('Inconsistent method arguments');
 end;
 
-Procedure TLogFile.Log(const Columns: array of Const; const ColumnWidths: array of Integer; Decimals: Integer);
+Procedure TLogFile.Log(const Columns: array of Const; const ColumnWidths, NDecimals: Integer);
 Var
   StringColumns: array of String;
 begin
   SetLength(StringColumns,Length(Columns));
-  for var Column := low(Columns) to high(Columns) do StringColumns[Column] := VarRecToStr(Columns[Column],Decimals);
+  for var Column := low(Columns) to high(Columns) do StringColumns[Column] := VarRecToStr(Columns[Column],NDecimals);
+  Log(StringColumns,ColumnWidths);
+end;
+
+Procedure TLogFile.Log(const Columns: array of Const; const ColumnWidths: array of Integer; const NDecimals: Integer);
+Var
+  StringColumns: array of String;
+begin
+  SetLength(StringColumns,Length(Columns));
+  for var Column := low(Columns) to high(Columns) do StringColumns[Column] := VarRecToStr(Columns[Column],NDecimals);
+  Log(StringColumns,ColumnWidths);
+end;
+Procedure TLogFile.Log(const Columns: array of Const; const ColumnWidths,NDecimals: array of Integer);
+Var
+  StringColumns: array of String;
+begin
+  SetLength(StringColumns,Length(Columns));
+  for var Column := low(Columns) to high(Columns) do StringColumns[Column] := VarRecToStr(Columns[Column],NDecimals[column]);
   Log(StringColumns,ColumnWidths);
 end;
 
