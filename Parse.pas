@@ -36,21 +36,30 @@ Type
 
   TDelimiter = (Comma,Tab,Semicolon,Space);
 
+  TDelimiterHelper = record helper for TDelimiter
+  public
+    Constructor Create(const Delimiter: string);
+    Function Delimiter: Char;
+    Function ToString: String;
+  end;
+
   TStringParser = record
   private
+    FToken: Integer;
     FTokens: TArray<String>;
     FSeparators: TArray<Char>;
     SplitOptions: TStringSplitOptions;
     ParseMethod: Integer;
+    Procedure SetToken(Token: Integer);
     Function GetExcludeEmpty: Boolean;
     Procedure SetExcludeEmpty(ExcludeEmpty: Boolean);
     Function GetTokens(Token: Integer): TToken; inline;
-    Function GetChar(Token: Integer): Char; inline;
-    Function GetStr(Token: Integer): String; inline;
-    Function GetByte(Token: Integer): Byte; inline;
-    Function GetInt(Token: Integer): Integer; inline;
-    Function GetInt64(Token: Integer): Int64; inline;
-    Function GetFloat(Token: Integer): Float64; inline;
+    Function GetChar(Token: Integer): Char; overload; inline;
+    Function GetStr(Token: Integer): String; overload; inline;
+    Function GetByte(Token: Integer): Byte; overload; inline;
+    Function GetInt(Token: Integer): Integer; overload; inline;
+    Function GetInt64(Token: Integer): Int64; overload; inline;
+    Function GetFloat(Token: Integer): Float64; overload; inline;
   public
     Class Operator Initialize(out Tokenizer: TStringParser);
   public
@@ -69,6 +78,8 @@ Type
     Constructor Create(Delimiter: TDelimiter; const Line: String; const Quote: Char); overload;
     Procedure RemoveTrailingEmpties;
     Procedure TrimTokens;
+    Function Extract(const Token: String): Integer; overload;
+    Function Extract(Token: Integer): String; overload;
     Procedure Clear;
     Procedure Assign(const Line: String); overload;
     Procedure Assign(const Line: String; Quote: Char); overload;
@@ -77,17 +88,16 @@ Type
     Procedure ReadLine(const TextReader: TTextReader; Quote: Char); overload;
     // Query Tokens
     Function Count: Integer; inline;
+    Function GetChar: Char; overload;
+    Function GetStr: String; overload;
+    Function GetByte: Byte; overload;
+    Function GetInt: Integer; overload;
+    Function GetInt64: Int64; overload;
+    Function GetFloat: Float64; overload;
     Function IndexOf(const Token: String; Offset: Integer = 0): Integer;
     Procedure AssignTo(var Tokens: array of Integer; FromToken: Integer = 0); overload;
     Procedure AssignTo(var Tokens: array of Float64; FromToken: Integer = 0); overload;
     Procedure AssignToVar(const Tokens: array of TVarPointer; FromToken: Integer = 0);
-    Property Tokens[Token: Integer]: TToken read GetTokens; default;
-    Property Char[Token: Integer]: Char read GetChar;
-    Property Str[Token: Integer]: String read GetStr;
-    Property Byte[Token: Integer]: Byte read GetByte;
-    Property Int[Token: Integer]: Integer read GetInt;
-    Property Int64[Token: Integer]: Int64 read GetInt64;
-    Property Float[Token: Integer]: Float64 read GetFloat;
     Function ToStrArray: TArray<String>; overload;
     Function ToStrArray(Offset,Count: Integer): TArray<String>; overload;
     Function ToIntArray: TArray<Int32>; overload;
@@ -96,12 +106,26 @@ Type
     Function ToFloatArray(Offset,Count: Integer): TArray<Float64>; overload;
     Function ToFloatArray(const FormatSettings: TFormatSettings): TArray<Float64>; overload;
     Function ToFloatArray(const FormatSettings: TFormatSettings; Offset,Count: Integer): TArray<Float64>; overload;
+    Function TryToInt(Token: Integer; out Value: Integer): Boolean;
+    Function TryToFloat(Token: Integer; out Value: Float64): Boolean;
     Function TryToIntArray(out Values: TArray<Int32>): Boolean; overload;
     Function TryToIntArray(Offset,Count: Integer; out Values: TArray<Int32>): Boolean; overload;
     Function TryToFloatArray(out Values: TArray<Float64>): Boolean; overload;
     Function TryToFloatArray(Offset,Count: Integer; out Values: TArray<Float64>): Boolean; overload;
     Function TryToFloatArray(const FormatSettings: TFormatSettings; out Values: TArray<Float64>): Boolean; overload;
     Function TryToFloatArray(const FormatSettings: TFormatSettings; Offset,Count: Integer; out Values: TArray<Float64>): Boolean; overload;
+    Function TrySum(out Sum: Float64): Boolean; overload;
+    Function TrySum(Offset,Count: Integer; out Sum: Float64): Boolean; overload;
+    Function TrySum(const FormatSettings: TFormatSettings; Offset,Count: Integer; out Sum: Float64): Boolean; overload;
+  public
+    Property Token: Integer read FToken write SetToken;
+    Property Tokens[Token: Integer]: TToken read GetTokens; default;
+    Property Char[Token: Integer]: Char read GetChar;
+    Property Str[Token: Integer]: String read GetStr;
+    Property Byte[Token: Integer]: Byte read GetByte;
+    Property Int[Token: Integer]: Integer read GetInt;
+    Property Int64[Token: Integer]: Int64 read GetInt64;
+    Property Float[Token: Integer]: Float64 read GetFloat;
   end;
 
   TFixedWidthParser = record
@@ -184,10 +208,53 @@ end;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+Constructor TDelimiterHelper.Create(const Delimiter: String);
+begin
+  for var Delim := low(TDelimiter) to high(TDelimiter) do
+  if SameText(Delimiter,Delim.ToString) then
+  begin
+    Self := Delim;
+    Exit;
+  end;
+  raise Exception.Create('Invalid delimiter ' + delimiter);
+end;
+
+Function TDelimiterHelper.Delimiter: Char;
+begin
+  case Self of
+    Comma: Result := ',';
+    Tab: Result := #9;
+    Semicolon: Result := ';';
+    Space: Result := ' ';
+    else raise Exception.Create('Delimiter out of range');
+  end;
+end;
+
+Function TDelimiterHelper.ToString: String;
+begin
+  case Self of
+    Comma: Result := 'comma';
+    Tab: Result := 'tab';
+    Semicolon: Result := 'semicolon';
+    Space: Result := 'space';
+    else raise Exception.Create('Delimiter out of range');
+  end;
+end;
+
+////////////////////////////////////////////////////////////////////////////////
+
 Class Operator TStringParser.Initialize(out Tokenizer: TStringParser);
 begin
   Tokenizer.ParseMethod := -1;
   Tokenizer.SpaceDelimited;
+end;
+
+Procedure TStringParser.SetToken(Token: Integer);
+begin
+  if (Token >= 0) and (Token < Count) then
+    FToken := Token
+  else
+    raise Exception.Create('Token out of range');
 end;
 
 Function TStringParser.GetExcludeEmpty: Boolean;
@@ -267,7 +334,7 @@ Procedure TStringParser.CSV;
 begin
   if ParseMethod <> Ord(Comma) then
   begin
-    SetSeparators([#44]);
+    SetSeparators([Comma.Delimiter]);
     ExcludeEmpty := false;
     ParseMethod := Ord(Comma);
   end;
@@ -277,7 +344,7 @@ Procedure TStringParser.TabDelimited;
 begin
   if ParseMethod <> Ord(Tab) then
   begin
-    SetSeparators([#9]);
+    SetSeparators([Tab.Delimiter]);
     ExcludeEmpty := false;
     ParseMethod := Ord(Tab);
   end;
@@ -287,7 +354,7 @@ Procedure TStringParser.SpaceDelimited;
 begin
   if ParseMethod <> Ord(Space) then
   begin
-    SetSeparators([#9,#32]);
+    SetSeparators([Tab.Delimiter,Space.Delimiter]);
     ExcludeEmpty := true;
     ParseMethod := Ord(Space);
   end;
@@ -297,7 +364,7 @@ Procedure TStringParser.SemicolonDelimited;
 begin
   if ParseMethod <> Ord(Semicolon) then
   begin
-    SetSeparators([#59]);
+    SetSeparators([Semicolon.Delimiter]);
     ExcludeEmpty := false;
     ParseMethod := Ord(Semicolon);
   end;
@@ -341,6 +408,24 @@ begin
   for var Token := 0 to Count-1 do FTokens[Token] := Trim(FTokens[Token]);
 end;
 
+Function TStringParser.Extract(const Token: String): Integer;
+begin
+  Result := IndexOf(Token);
+  Extract(Result);
+end;
+
+Function TStringParser.Extract(Token: Integer): String;
+begin
+  Result := '';
+  if Token >= 0 then
+  begin
+    Result := FTokens[Token];
+    if Token < FToken then Dec(FToken);
+    for var Index := Token to Count-2 do FTokens[Index] := FTokens[Index+1];
+    SetLength(FTokens,Count-1);
+  end;
+end;
+
 Procedure TStringParser.Clear;
 begin
   FTokens := nil;
@@ -349,11 +434,13 @@ end;
 Procedure TStringParser.Assign(const Line: String);
 begin
   FTokens := Line.Split(FSeparators,SplitOptions);
+  if Count > 0 then FToken := 0 else FToken := -1;
 end;
 
 Procedure TStringParser.Assign(const Line: String; Quote: Char);
 begin
   FTokens := Line.Split(FSeparators,Quote,Quote,SplitOptions);
+  if Count > 0 then FToken := 0 else FToken := -1;
 end;
 
 Procedure TStringParser.ReadLine(var TextFile: TextFile);
@@ -377,6 +464,66 @@ end;
 Function TStringParser.Count: Integer;
 begin
   Result := Length(FTokens);
+end;
+
+Function TStringParser.GetChar: Char;
+begin
+  if FToken < Count then
+  begin
+    Result := GetChar(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
+end;
+
+Function TStringParser.GetStr: String;
+begin
+  if FToken < Count then
+  begin
+    Result := GetStr(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
+end;
+
+Function TStringParser.GetByte: Byte;
+begin
+  if FToken < Count then
+  begin
+    Result := GetByte(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
+end;
+
+Function TStringParser.GetInt: Integer;
+begin
+  if FToken < Count then
+  begin
+    Result := GetInt(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
+end;
+
+Function TStringParser.GetInt64: Int64;
+begin
+  if FToken < Count then
+  begin
+    Result := GetInt64(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
+end;
+
+Function TStringParser.GetFloat: Float64;
+begin
+  if FToken < Count then
+  begin
+    Result := GetFloat(FToken);
+    Inc(FToken);
+  end else
+    raise Exception.Create('Token out of range');
 end;
 
 Function TStringParser.IndexOf(const Token: String; Offset: Integer = 0): Integer;
@@ -464,6 +611,16 @@ begin
   for var Token := 0 to Count-1 do Result[Token] := StrToFloat(FTokens[Token+Offset],FormatSettings);
 end;
 
+Function TStringParser.TryToInt(Token: Integer; out Value: Integer): Boolean;
+begin
+  Result := TryStrToInt(FTokens[Token],Value);
+end;
+
+Function TStringParser.TryToFloat(Token: Integer; out Value: Float64): Boolean;
+begin
+  Result := TryStrToFloat(FTokens[Token],Value);
+end;
+
 Function TStringParser.TryToIntArray(out Values: TArray<Int32>): Boolean;
 begin
   Result := TryToIntArray(0,Count,Values);
@@ -498,6 +655,29 @@ begin
   SetLength(Values,Count);
   for var Token := 0 to Count-1 do
   if not TryStrToFloat(FTokens[Token+Offset],Values[Token],FormatSettings) then Exit(false);
+end;
+
+Function TStringParser.TrySum(out Sum: Float64): Boolean;
+begin
+  Result := TrySum(0,Count,Sum);
+end;
+
+Function TStringParser.TrySum(Offset,Count: Integer; out Sum: Float64): Boolean;
+begin
+  Result := TrySum(FormatSettings,Offset,Count,Sum);
+end;
+
+Function TStringParser.TrySum(const FormatSettings: TFormatSettings; Offset,Count: Integer; out Sum: Float64): Boolean;
+Var
+  Value: Float64;
+begin
+  Sum := 0;
+  Result := true;
+  for var Token := 0 to Count-1 do
+  if TryStrToFloat(FTokens[Token+Offset],Value,FormatSettings) then
+    Sum := Sum + Value
+  else
+    Exit(false);
 end;
 
 ////////////////////////////////////////////////////////////////////////////////
